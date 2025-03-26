@@ -3,6 +3,10 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const cron = require("node-cron"); // Add this line to import node-cron
+
+// Import the Codeforces Scraper
+const CodeforcesScraper = require("./scraper/codeforces.js");
 
 const app = express();
 app.use(express.json());
@@ -14,25 +18,11 @@ mongoose
   .then(() => console.log("MongoDB Connected"))
   .catch((err) => console.log("MongoDB Error:", err));
 
-// User Schema
-/*const UserSchema = new mongoose.Schema({
-  name: String,
-  score: Number,
-  platform: String,
-  ema: Number, // Exponential Moving Average
-});
-const User = mongoose.model("User", UserSchema);
-*/
+// Initialize Codeforces Scraper
+const cfScraper = new CodeforcesScraper();
 
-// API to get leaderboard
-/*app.get("/api/leaderboard", async (req, res) => {
-const users = await User.find().sort({ score: -1 });
-  res.json(users);
-}); 
-*/
-
+// API routes
 app.use("/api/leaderboard", require("./routes/leaderboard"));
-
 
 // API to add dummy users
 app.get("/api/populate", async (req, res) => {
@@ -45,6 +35,22 @@ app.get("/api/populate", async (req, res) => {
     { name: "Eve", score: 1025, platform: "codeforces", ema: 990 },
   ]);
   res.json({ message: "Dummy users added!" });
+});
+
+// Manual trigger for Codeforces update
+app.get("/api/update-codeforces", async (req, res) => {
+  try {
+    await cfScraper.scheduledUpdate();
+    res.json({ message: "Codeforces users updated successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Scheduled daily update for Codeforces users
+cron.schedule('0 0 * * *', () => {
+  console.log('Running daily Codeforces user update');
+  cfScraper.scheduledUpdate();
 });
 
 // Start server
