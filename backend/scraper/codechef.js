@@ -10,7 +10,7 @@ class CodeChefProblemTracker {
         this.baseUrl = 'https://www.codechef.com';
     }
 
-    async fetchRecentActivity() {
+    async fetchUniqueSolvedProblems() {
         let browser = null;
         try {
             // Launch the browser with more flexible options
@@ -35,63 +35,67 @@ class CodeChefProblemTracker {
                 timeout: 60000 // 60 seconds timeout
             });
 
-            // Extract recent activity using more flexible selector
-            const recentActivity = await page.evaluate(() => {
+            // Extract unique solved problems
+            const solvedProblems = await page.evaluate(() => {
                 // Select the table with recent activity
                 const table = document.querySelector('div.widget.recent-activity table');
                 
                 if (!table) return [];
 
-                // Convert table rows to an array of activity details
+                // Convert table rows to an array of unique problem details
                 const rows = Array.from(table.querySelectorAll('tbody tr'));
-                return rows.map(row => {
+                const uniqueProblems = new Map();
+
+                rows.forEach(row => {
                     const columns = row.querySelectorAll('td');
                     if (columns.length >= 4) {
-                        return {
-                            time: columns[0].textContent.trim(),
-                            problem: columns[1].textContent.trim(),
-                            result: columns[2].textContent.trim(),
-                            language: columns[3].textContent.trim(),
-                            solution: columns[4] ? columns[4].textContent.trim() : ''
-                        };
+                        const time = columns[0].textContent.trim();
+                        const problem = columns[1].textContent.trim();
+
+                        // Only add if not already in the map
+                        if (!uniqueProblems.has(problem)) {
+                            uniqueProblems.set(problem, time);
+                        }
                     }
-                    return null;
-                }).filter(activity => activity !== null);
+                });
+
+                // Convert map to array of objects
+                return Array.from(uniqueProblems, ([problemName, submissionTime]) => ({
+                    problemName,
+                    submissionTime
+                }));
             });
 
-            return recentActivity;
+            return {
+                totalUniqueProblemsSolved: solvedProblems.length,
+                problems: solvedProblems
+            };
         } catch (error) {
-            console.error('Error fetching recent activity:', error);
-            return [];
+            console.error('Error fetching unique solved problems:', error);
+            return { totalUniqueProblemsSolved: 0, problems: [] };
         } finally {
             // Always close the browser
             if (browser) await browser.close();
         }
     }
 
-    async generateActivityReport() {
+    async generateProblemReport() {
         try {
-            const recentActivity = await this.fetchRecentActivity();
+            const { totalUniqueProblemsSolved, problems } = await this.fetchUniqueSolvedProblems();
             
-            if (recentActivity.length === 0) {
-                console.log('No recent activity found or unable to fetch activities.');
-                return;
-            }
-
-            console.log('Recent Activity:');
-            recentActivity.forEach(activity => {
-                console.log(`Time: ${activity.time}`);
-                console.log(`Problem: ${activity.problem}`);
-                console.log(`Result: ${activity.result}`);
-                console.log(`Language: ${activity.language}`);
-                console.log(`Solution: ${activity.solution}`);
+            console.log(`Total Unique Problems Solved: ${totalUniqueProblemsSolved}`);
+            
+            problems.forEach((problem, index) => {
+                console.log(`Problem ${index + 1}:`);
+                console.log(`Name: ${problem.problemName}`);
+                console.log(`Submission Time: ${problem.submissionTime}`);
                 console.log('---');
             });
 
-            return recentActivity;
+            return { totalUniqueProblemsSolved, problems };
         } catch (error) {
-            console.error('Error generating activity report:', error.message);
-            return [];
+            console.error('Error generating problem report:', error.message);
+            return { totalUniqueProblemsSolved: 0, problems: [] };
         }
     }
 }
@@ -102,7 +106,7 @@ async function main() {
     const problemTracker = new CodeChefProblemTracker(username);
     
     try {
-        await problemTracker.generateActivityReport();
+        await problemTracker.generateProblemReport();
     } catch (error) {
         console.error('Main execution error:', error);
     }

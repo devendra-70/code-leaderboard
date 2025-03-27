@@ -1,82 +1,125 @@
-const express = require("express");
-const { graphqlHTTP } = require("express-graphql");
-const { buildSchema } = require("graphql");
-const puppeteer = require("puppeteer");
-
-// GraphQL Schema
-const schema = buildSchema(`
-  type Query {
-    leetcodeStats(username: String!): LeetCodeData
+// Use native fetch in Node.js 18+
+const query = `
+  query getUserProfile($username: String!) {
+    allQuestionsCount {
+      difficulty
+      count
+    }
+    matchedUser(username: $username) {
+      contributions {
+        points
+      }
+      profile {
+        reputation
+        ranking
+      }
+      submissionCalendar
+      submitStats {
+        acSubmissionNum {
+          difficulty
+          count
+          submissions
+        }
+        totalSubmissionNum {
+          difficulty
+          count
+          submissions
+        }
+      }
+    }
+    recentSubmissionList(username: $username) {
+      title
+      titleSlug
+      timestamp
+      statusDisplay
+      lang
+      __typename
+    }
+    matchedUserStats: matchedUser(username: $username) {
+      submitStats: submitStatsGlobal {
+        acSubmissionNum {
+          difficulty
+          count
+          submissions
+          __typename
+        }
+        totalSubmissionNum {
+          difficulty
+          count
+          submissions
+          __typename
+        }
+        __typename
+      }
+    }
   }
+`;
 
-  type LeetCodeData {
-    username: String
-    easy: String
-    medium: String
-    hard: String
-  }
-`);
+// Format the fetched data into a more readable structure
+const formatData = (data) => {
+    return {
+        totalSolved: data.matchedUser.submitStats.acSubmissionNum[0].count,
+        totalSubmissions: data.matchedUser.submitStats.totalSubmissionNum,
+        totalQuestions: data.allQuestionsCount[0].count,
+        easySolved: data.matchedUser.submitStats.acSubmissionNum[1].count,
+        totalEasy: data.allQuestionsCount[1].count,
+        mediumSolved: data.matchedUser.submitStats.acSubmissionNum[2].count,
+        totalMedium: data.allQuestionsCount[2].count,
+        hardSolved: data.matchedUser.submitStats.acSubmissionNum[3].count,
+        totalHard: data.allQuestionsCount[3].count,
+        ranking: data.matchedUser.profile.ranking,
+        contributionPoint: data.matchedUser.contributions.points,
+        reputation: data.matchedUser.profile.reputation,
+        submissionCalendar: JSON.parse(data.matchedUser.submissionCalendar),
+        recentSubmissions: data.recentSubmissionList,
+        matchedUserStats: data.matchedUser.submitStats
+    };
+};
 
-// Scraping function with retries
-async function scrapeLeetCode(username, retry = 1) {
-    const url = `https://leetcode.com/${username}/`;
-    const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
-    const page = await browser.newPage();
-
+// Main function to fetch LeetCode user data
+async function fetchLeetCodeProfile(username) {
     try {
-        await page.goto(url, { waitUntil: "networkidle2", timeout: 15000 });
-
-        // Wait for the statistics container to load
-        await page.waitForSelector("div.flex.h-full.w-[90px].flex-none.flex-col.gap-2 > div:nth-child(1)", { timeout: 10000 });
-
-        // Extract counts
-        const counts = await page.evaluate(() => {
-            const getText = (selector) => {
-                const element = document.querySelector(selector);
-                return element ? element.innerText.trim() : "Not Found";
-            };
-
-            return {
-                easy: getText("div.flex.h-full.w-[90px].flex-none.flex-col.gap-2 > div:nth-child(1)"),
-                medium: getText("div.flex.h-full.w-[90px].flex-none.flex-col.gap-2 > div:nth-child(2)"),
-                hard: getText("div.flex.h-full.w-[90px].flex-none.flex-col.gap-2 > div:nth-child(3)"),
-            };
+        const response = await fetch('https://leetcode.com/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Referer': 'https://leetcode.com',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            },
+            body: JSON.stringify({
+                query: query, 
+                variables: { username: username }
+            })
         });
 
-        await browser.close();
-        return { username, ...counts };
-    } catch (error) {
-        console.error(`Error scraping LeetCode (Attempt ${retry}):`, error);
-        await browser.close();
+        const data = await response.json();
 
-        // Retry scraping if first attempt fails (max 2 retries)
-        if (retry < 2) {
-            return scrapeLeetCode(username, retry + 1);
+        if (data.errors) {
+            console.error('GraphQL Errors:', data.errors);
+            return null;
         }
 
-        return { username, easy: "Error", medium: "Error", hard: "Error" };
+        return formatData(data.data);
+
+    } catch (error) {
+        console.error('Error fetching LeetCode profile:', error);
+        return null;
     }
 }
 
-// GraphQL Resolver
-const root = {
-    leetcodeStats: async ({ username }) => {
-        return await scrapeLeetCode(username);
+// Example usage
+async function main() {
+    const username = 'devendramahajan'; // Replace with actual username
+    const profileData = await fetchLeetCodeProfile(username);
+    
+    if (profileData) {
+        console.log('Total Questions Solved:', profileData.totalSolved);
+        console.log('Easy Solved:', profileData.easySolved);
+        console.log('Medium Solved:', profileData.mediumSolved);
+        console.log('Hard Solved:', profileData.hardSolved);
+        console.log('User Ranking:', profileData.ranking);
     }
-};
+}
 
-// Express GraphQL Server
-const app = express();
-app.use(
-    "/graphql",
-    graphqlHTTP({
-        schema: schema,
-        rootValue: root,
-        graphiql: true,
-    })
-);
-
-const PORT = 4000;
-app.listen(PORT, () => {
-    console.log(`GraphQL Server running at http://localhost:${PORT}/graphql`);
-});
+// Run the main function
+main().catch(console.error);
